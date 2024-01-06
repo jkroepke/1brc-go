@@ -3,16 +3,19 @@ package main
 import (
 	"bufio"
 	"bytes"
-	maps "golang.org/x/exp/maps"
+	"golang.org/x/exp/maps"
+	"golang.org/x/exp/mmap"
 	"math"
 	"os"
-	"runtime"
-	"sort"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/valyala/fastjson/fastfloat"
 )
+
+const workerCount = 12
 
 type stationResult struct {
 	min float64
@@ -33,50 +36,40 @@ func main() {
 func execute(fileName string) {
 	var id uint32
 
-	workerCount := int64(runtime.NumCPU())
+	stationNames := make(map[string]uint32, 10_000)
+	stationMap := [10_000]stationResult{}
 
-	stationNames := make(map[[128]byte]uint32, 10_000)
-	stationMap := make(map[uint32]stationResult, 10_000)
-
-	file, err := os.Open(fileName)
+	readerAt, err := mmap.Open(fileName)
 	if err != nil {
 		panic(err)
 	}
 
-	scanner := bufio.NewScanner(file)
-	var pos int
+	sneak := make([]byte, 1_000_000)
+	_, err = readerAt.ReadAt(sneak, 0)
+	if err != nil {
+		panic(err)
+	}
+	sneakScanner := bufio.NewScanner(bytes.NewReader(sneak))
 
-	for scanner.Scan() {
-		var buf [128]byte
-		station, _, _ := strings.Cut(scanner.Text(), ";")
-		copy(buf[:], station)
-
-		if _, ok := stationNames[buf]; !ok {
-			stationNames[buf] = id
+	for sneakScanner.Scan() {
+		station, _, _ := strings.Cut(sneakScanner.Text(), ";")
+		if _, ok := stationNames[station]; !ok {
+			stationNames[station] = id
 			id++
 
-			stationMap[stationNames[buf]] = stationResult{}
-		}
-
-		pos += len(scanner.Bytes())
-		if pos > 1_000_000_000 {
-			break
+			stationMap[stationNames[station]] = stationResult{}
 		}
 	}
 
-	stat, _ := file.Stat()
-	workerSize := stat.Size() / workerCount
-
-	_ = file.Close()
+	workerSize := readerAt.Len() / workerCount
 
 	stations := maps.Keys(stationNames)
-	sort.Slice(stations, func(i, j int) bool {
-		return bytes.Compare(stations[i][:], stations[j][:]) < 0
-	})
+	slices.Sort(stations)
 
 	wgl := sync.WaitGroup{}
 
-	for i := int64(0); i < workerCount; i++ {
+	results := [12][10_000]stationResult{}
+	for i := 0; i < workerCount; i++ {
 		wgl.Add(1)
 		i := i
 
@@ -85,69 +78,60 @@ func execute(fileName string) {
 
 			var tempF float64
 
-			localMap := make(map[uint32]stationResult, 10_000)
+			data := make([]byte, workerSize+20)
+			_, _ = readerAt.ReadAt(data, int64(workerSize*i))
 
-			file, _ := os.Open(fileName)
-			_, _ = file.Seek(workerSize*i, 0)
-
-			scanner := bufio.NewScanner(file)
+			scanner := bufio.NewScanner(bytes.NewReader(data))
 			if i != 0 {
 				scanner.Scan()
 			}
-
-			var (
-				ok     bool
-				pos    int
-				result stationResult
-			)
-
-			fileRange := int(workerSize + 20)
 			for scanner.Scan() {
-				var buf [128]byte
 				station, temp, _ := strings.Cut(scanner.Text(), ";")
-				copy(buf[:], station)
+				tempF = fastfloat.ParseBestEffort(temp)
 
-				tempF, _ = strconv.ParseFloat(temp, 64)
+				stationID := stationNames[station]
 
-				if result, ok = localMap[stationNames[buf]]; !ok {
-					result = stationResult{}
-				}
-
-				result.min = math.Min(result.min, tempF)
-				result.max = math.Max(result.max, tempF)
-				result.sum += tempF
-				result.num++
-				localMap[stationNames[buf]] = result
-
-				pos += len(scanner.Bytes())
-				if pos > fileRange {
-					break
-				}
+				results[i][stationID].num++
+				results[i][stationID].sum += tempF
+				results[i][stationID].min = math.Min(results[i][stationID].min, tempF)
+				results[i][stationID].max = math.Max(results[i][stationID].max, tempF)
 			}
 		}()
 	}
 
 	wgl.Wait()
-	/*
-		result, _ := stationMap.Load(stationNames[stations[0]])
-		print("{",
-			stations[0], "=",
+
+	for _, result := range results {
+		for station, stationResult := range result {
+			if stationResult.num == 0 {
+				continue
+			}
+
+			stationMap[station].min = math.Min(stationMap[station].min, stationResult.min)
+			stationMap[station].max = math.Max(stationMap[station].max, stationResult.max)
+			stationMap[station].sum += stationResult.sum
+			stationMap[station].num += stationResult.num
+		}
+	}
+
+	result := stationMap[stationNames[stations[0]]]
+	print("{",
+		stations[0], "=",
+		int(result.min), "/",
+		int(result.sum/result.num), "/",
+		int(result.max),
+	)
+
+	for _, station := range stations[1:] {
+		result := stationMap[stationNames[station]]
+		print(", ",
+			station, "=",
 			int(result.min), "/",
 			int(result.sum/result.num), "/",
 			int(result.max),
 		)
+	}
 
-		for _, station := range stations[1:] {
-			result, _ := stationMap.Load(stationNames[station])
-			print(", ",
-				station, "=",
-				int(result.min), "/",
-				int(result.sum/result.num), "/",
-				int(result.max),
-			)
-		}
-
-		print("}")
-		print("\n")
-	*/
+	print("}")
+	print("\n")
 }
