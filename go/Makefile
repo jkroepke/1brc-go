@@ -5,7 +5,7 @@ clean:
 	rm -f default.pgo 1brc-go
 
 default.pgo:
-	CGO_ENABLED=0 go test -bench '^\QBenchmarkReal\E$$' -run '^$$' -count 1 -cpuprofile default.pgo -bench . > /dev/null
+	CGO_ENABLED=0 go test -bench 'BenchmarkReal' -run '^$' -count 1 -cpuprofile default.pgo . > /dev/null
 
 result.txt:
 	../calculate_average_baseline.sh > result.txt
