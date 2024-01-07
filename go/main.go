@@ -81,11 +81,11 @@ func execute(fileName string) {
 	workerSize := len(data) / workerCount
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < workerCount; i++ {
+	for workerID := 0; workerID < workerCount; workerID++ {
 		wg.Add(1)
 
 		// process data in parallel
-		go func(i int) {
+		go func(workerID int) {
 			defer wg.Done()
 
 			var (
@@ -95,12 +95,12 @@ func execute(fileName string) {
 				temperature int64
 			)
 
-			last := workerSize*(i+1) + 20
+			last := workerSize*(workerID+1) + 20
 			if last > len(data) {
 				last = len(data) - 1
 			}
 
-			data := data[workerSize*i : last]
+			data := data[workerSize*workerID : last]
 			data = data[bytes.IndexByte(data, '\n')+1 : bytes.LastIndexByte(data, '\n')+1]
 
 			for {
@@ -144,16 +144,16 @@ func execute(fileName string) {
 					}
 				}
 
-				results[i][stationID].count++
-				results[i][stationID].sum += temperature
-				if temperature < results[i][stationID].min {
-					results[i][stationID].min = temperature
+				results[workerID][stationID].count++
+				results[workerID][stationID].sum += temperature
+				if temperature < results[workerID][stationID].min {
+					results[workerID][stationID].min = temperature
 				}
-				if temperature > results[i][stationID].max {
-					results[i][stationID].max = temperature
+				if temperature > results[workerID][stationID].max {
+					results[workerID][stationID].max = temperature
 				}
 			}
-		}(i)
+		}(workerID)
 	}
 
 	// wait for all workers to finish
