@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"hash/maphash"
 	"log"
 	"math"
 	"os"
+	"sort"
 	"sync"
 	"syscall"
 )
@@ -20,10 +20,10 @@ const (
 var (
 	maphashSeed = maphash.MakeSeed()
 
-	results          = [workerCount][numberOfMaxStations]stationResult{}
-	stationNames     = make([]string, 0, numberOfMaxStations)
+	workerResults    = [workerCount][numberOfMaxStations]stationResult{}
+	stationNames     = make([][]byte, 0, numberOfMaxStations)
+	stationResults   = [numberOfMaxStations]stationResult{}
 	stationSymbolMap = make(map[uint64]uint64, numberOfMaxStations)
-	stationResultMap = [numberOfMaxStations]stationResult{}
 )
 
 type stationResult struct {
@@ -59,7 +59,7 @@ func execute(fileName string) {
 
 		stationID = maphash.Bytes(maphashSeed, data[pos:pos+off])
 		if _, ok := stationSymbolMap[stationID]; !ok {
-			stationNames = append(stationNames, string(data[pos:pos+off]))
+			stationNames = append(stationNames, data[pos:pos+off])
 			stationSymbolMap[stationID] = id
 			id++
 		}
@@ -144,13 +144,13 @@ func execute(fileName string) {
 					}
 				}
 
-				results[workerID][stationID].count++
-				results[workerID][stationID].sum += temperature
-				if temperature < results[workerID][stationID].min {
-					results[workerID][stationID].min = temperature
+				workerResults[workerID][stationID].count++
+				workerResults[workerID][stationID].sum += temperature
+				if temperature < workerResults[workerID][stationID].min {
+					workerResults[workerID][stationID].min = temperature
 				}
-				if temperature > results[workerID][stationID].max {
-					results[workerID][stationID].max = temperature
+				if temperature > workerResults[workerID][stationID].max {
+					workerResults[workerID][stationID].max = temperature
 				}
 			}
 		}(workerID)
@@ -159,38 +159,40 @@ func execute(fileName string) {
 	// wait for all workers to finish
 	wg.Wait()
 
-	// merge results
-	for _, result := range results {
+	// merge workerResults
+	for _, result := range workerResults {
 		for stationID, stationResult := range result {
 			if stationResult.count == 0 {
 				continue
 			}
 
-			stationResultMap[stationID].sum += stationResult.sum
-			stationResultMap[stationID].count += stationResult.count
-			if stationResult.min < stationResultMap[stationID].min {
-				stationResultMap[stationID].min = stationResult.min
+			stationResults[stationID].sum += stationResult.sum
+			stationResults[stationID].count += stationResult.count
+			if stationResult.min < stationResults[stationID].min {
+				stationResults[stationID].min = stationResult.min
 			}
-			if stationResult.max > stationResultMap[stationID].max {
-				stationResultMap[stationID].max = stationResult.max
+			if stationResult.max > stationResults[stationID].max {
+				stationResults[stationID].max = stationResult.max
 			}
 		}
 	}
 
 	// sort station names
-	slices.Sort(stationNames)
+	sort.Slice(stationNames, func(i, j int) bool {
+		return bytes.Compare(stationNames[i], stationNames[j]) < 0
+	})
 
 	fmt.Print("{")
 
 	var result stationResult
 
-	// Print results {station1=min/avg/max, station2=min/avg/max, ...}
+	// Print workerResults {station1=min/avg/max, station2=min/avg/max, ...}
 	for i, station := range stationNames {
 		if i != 0 {
 			fmt.Print(", ")
 		}
 
-		result = stationResultMap[stationSymbolMap[maphash.String(maphashSeed, station)]]
+		result = stationResults[stationSymbolMap[maphash.Bytes(maphashSeed, station)]]
 		fmt.Printf("%s=%.1f/%.1f/%.1f",
 			station,
 			float64(result.min)/10,
