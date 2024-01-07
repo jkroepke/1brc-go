@@ -15,10 +15,15 @@ result.txt:
 
 run: build
 	GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 6 // CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 6 // CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 6 // CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 6 // CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 10 // CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > result.txt
 
 run-fast: build
