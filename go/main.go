@@ -42,13 +42,14 @@ func execute(fileName string) {
 	defer closer()
 
 	var (
-		id  uint64
-		pos int
-		off int
+		id        uint64
+		pos       int
+		off       int
+		stationID uint64
 	)
 
 	// get all station names, assume all station are in the first 5_000_000 lines
-	for {
+	for pos <= 5_000_000 {
 		for j, c := range data[pos:] {
 			if c == ';' {
 				off = j
@@ -56,11 +57,7 @@ func execute(fileName string) {
 			}
 		}
 
-		if pos >= 5_000_000 {
-			break
-		}
-
-		stationID := maphash.Bytes(maphashSeed, data[pos:pos+off])
+		stationID = maphash.Bytes(maphashSeed, data[pos:pos+off])
 		if _, ok := stationSymbolMap[stationID]; !ok {
 			stationNames = append(stationNames, string(data[pos:pos+off]))
 			stationSymbolMap[stationID] = id
@@ -70,13 +67,14 @@ func execute(fileName string) {
 		pos += off + 2
 
 		if data[pos+2] == '.' {
+			// -21.3\n
 			pos += 5
 		} else if data[pos+1] == '.' {
+			// 21.3\n or -1.3\n
 			pos += 4
 		} else if data[pos] == '.' {
+			// 1.3\n
 			pos += 3
-		} else {
-			panic("invalid temperature")
 		}
 	}
 
@@ -86,6 +84,7 @@ func execute(fileName string) {
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 
+		// process data in parallel
 		go func(i int) {
 			defer wg.Done()
 
@@ -157,8 +156,10 @@ func execute(fileName string) {
 		}(i)
 	}
 
+	// wait for all workers to finish
 	wg.Wait()
 
+	// merge results
 	for _, result := range results {
 		for stationID, stationResult := range result {
 			if stationResult.count == 0 {
@@ -176,12 +177,14 @@ func execute(fileName string) {
 		}
 	}
 
+	// sort station names
 	slices.Sort(stationNames)
 
 	fmt.Print("{")
 
 	var result stationResult
 
+	// Print results {station1=min/avg/max, station2=min/avg/max, ...}
 	for i, station := range stationNames {
 		if i != 0 {
 			fmt.Print(", ")
