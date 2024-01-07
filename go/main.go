@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"hash/maphash"
 	"log"
-	"math"
 	"os"
 	"sort"
 	"sync"
@@ -196,7 +195,7 @@ func execute(fileName string) {
 		fmt.Printf("%s=%.1f/%.1f/%.1f",
 			station,
 			float64(result.min)/10,
-			math.Round(float64(result.sum)/float64(result.count))/10.0,
+			float64(result.sum)/(float64(result.count)*10),
 			float64(result.max)/10,
 		)
 	}
