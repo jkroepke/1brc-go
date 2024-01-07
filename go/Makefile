@@ -5,7 +5,7 @@ clean:
 	rm -f default.pgo 1brc-go
 
 default.pgo:
-	CGO_ENABLED=0 go test -bench 'BenchmarkReal' -run '^$' -count 1 -cpuprofile default.pgo . > /dev/null
+	CGO_ENABLED=0 go test -bench 'BenchmarkReal' -run '^$$' -count 1 -cpuprofile default.pgo . > /dev/null
 
 result.txt:
 	../calculate_average_baseline.sh > result.txt
@@ -14,16 +14,12 @@ result.txt:
 	CGO_ENABLED=0 go build -gcflags=-B -pgo=default.pgo .
 
 run: build
-	GOGC=off ./1brc-go ../measurements.txt > /dev/null
-	sleep 6 # CPU throttling
-	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
-	sleep 6 # CPU throttling
-	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
-	sleep 6 # CPU throttling
-	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
-	sleep 6 # CPU throttling
+	time  GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 10 # CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
 	sleep 10 # CPU throttling
+	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	sleep 15 # CPU throttling
 	time GOGC=off ./1brc-go ../measurements.txt > result.txt
 
 run-fast: build
