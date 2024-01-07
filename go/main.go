@@ -62,11 +62,18 @@ func execute(fileName string) {
 			id++
 		}
 
-		data = data[index+1:]
-		index = findNewlineAfterTemperature(data)
-		pos += index + 1
-
-		data = data[index+1:]
+		if data[index+4] == '.' {
+			data = data[index+7:]
+			pos += index + 7
+		} else if data[index+3] == '.' {
+			data = data[index+6:]
+			pos += index + 6
+		} else if data[index+2] == '.' {
+			data = data[index+5:]
+			pos += index + 5
+		} else {
+			panic("invalid temperature")
+		}
 	}
 
 	workerSize := len(data) / workerCount
@@ -116,7 +123,6 @@ func execute(fileName string) {
 						data = data[4:]
 						// 12.3\n
 					} else {
-						_ = data[4]
 						temperature = int64(data[3]) + int64(data[1])*10 + int64(data[0])*100 - '0'*(111)
 						data = data[5:]
 					}
@@ -141,18 +147,18 @@ func execute(fileName string) {
 	wg.Wait()
 
 	for _, result := range results {
-		for station, stationResult := range result {
+		for stationID, stationResult := range result {
 			if stationResult.count == 0 {
 				continue
 			}
 
-			stationResultMap[station].sum += stationResult.sum
-			stationResultMap[station].count += stationResult.count
-			if stationResult.min < stationResultMap[station].min {
-				stationResultMap[station].min = stationResult.min
+			stationResultMap[stationID].sum += stationResult.sum
+			stationResultMap[stationID].count += stationResult.count
+			if stationResult.min < stationResultMap[stationID].min {
+				stationResultMap[stationID].min = stationResult.min
 			}
-			if stationResult.max > stationResultMap[station].max {
-				stationResultMap[station].max = stationResult.max
+			if stationResult.max > stationResultMap[stationID].max {
+				stationResultMap[stationID].max = stationResult.max
 			}
 		}
 	}
@@ -161,33 +167,23 @@ func execute(fileName string) {
 
 	fmt.Print("{")
 
+	var result stationResult
+
 	for i, station := range stationNames {
 		if i != 0 {
 			fmt.Print(", ")
 		}
 
-		stationID := stationSymbolMap[maphash.String(maphashSeed, station)]
-		result := stationResultMap[stationID]
+		result = stationResultMap[stationSymbolMap[maphash.String(maphashSeed, station)]]
 		fmt.Printf("%s=%.1f/%.1f/%.1f",
 			station,
-			round(float64(result.min)/10.0),
-			round(float64(result.sum)/10.0/float64(result.count)),
-			round(float64(result.max)/10.0),
+			float64(result.min)/10,
+			math.Round(float64(result.sum)/float64(result.count))/10.0,
+			float64(result.max)/10,
 		)
 	}
 
 	fmt.Print("}\n")
-}
-
-func round(x float64) float64 {
-	return math.Round(x*10.0) / 10.0
-}
-
-func Abs(x int64) int64 {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
 
 // openFile uses syscall.Mmap to read file into memory.
@@ -208,30 +204,6 @@ func openFile(fileName string) ([]byte, func()) {
 	return data, func() { _ = syscall.Munmap(data); _ = f.Close() }
 }
 
-// parseNumber reads decimal number that matches "^-?[0-9]{1,2}[.][0-9]" pattern,
-// e.g.: -12.3, -3.4, 5.6, 78.9 and return the value*10, i.e. -123, -34, 56, 789.
-func parseNumber(data []byte) int64 {
-	negative := data[0] == '-'
-	if negative {
-		data = data[1:]
-	}
-
-	var result int64
-	switch len(data) {
-	// 1.2
-	case 3:
-		result = int64(data[0])*10 + int64(data[2]) - '0'*11
-	// 12.3
-	case 4:
-		result = int64(data[0])*100 + int64(data[1])*10 + int64(data[3]) - '0'*111
-	}
-
-	if negative {
-		return -result
-	}
-	return result
-}
-
 func indexByte(data []byte, ch byte) int {
 	pos := -1
 	for j, c := range data {
@@ -241,16 +213,4 @@ func indexByte(data []byte, ch byte) int {
 		}
 	}
 	return pos
-}
-
-func findNewlineAfterTemperature(data []byte) int {
-	if data[3] == '.' {
-		return 5
-	} else if data[2] == '.' {
-		return 4
-	} else if data[1] == '.' {
-		return 3
-	} else {
-		panic("invalid temperature")
-	}
 }
