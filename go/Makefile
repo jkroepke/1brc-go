@@ -5,16 +5,24 @@ clean:
 	rm -f default.pgo 1brc-go
 
 default.pgo:
-	CGO_ENABLED=0 go test -bench '^\QBenchmarkShort\E$$' -run '^$$' -count 10 -cpuprofile default.pgo -bench . > /dev/null
+	CGO_ENABLED=0 go test -bench '^\QBenchmarkReal\E$$' -run '^$$' -count 1 -cpuprofile default.pgo -bench . > /dev/null
+
+result.txt:
+	../calculate_average_baseline.sh > result.txt
 
 1brc-go:
-	CGO_ENABLED=0 go build -pgo=default.pgo .
+	CGO_ENABLED=0 go build -gcflags=-B -pgo=default.pgo .
 
 run: build
-	./1brc-go ../measurements1000000000.txt > result.txt
+	GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	time GOGC=off ./1brc-go ../measurements.txt > /dev/null
+	time GOGC=off ./1brc-go ../measurements.txt > result.txt
 
 run-fast: build
-	./1brc-go ../measurements100000000.txt
+	./1brc-go ../measurements.txt
 
-test: run
+test: result.txt run
 	diff expected.txt result.txt

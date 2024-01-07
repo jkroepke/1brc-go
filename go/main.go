@@ -10,7 +10,6 @@ import (
 	"os"
 	"sync"
 	"syscall"
-	"time"
 )
 
 const (
@@ -35,11 +34,7 @@ type stationResult struct {
 }
 
 func main() {
-	start := time.Now()
-
 	execute(os.Args[1])
-
-	_, _ = fmt.Fprintf(os.Stderr, "%dms\n", time.Since(start).Milliseconds())
 }
 
 func execute(fileName string) {
@@ -54,7 +49,7 @@ func execute(fileName string) {
 
 	// get all station names, assume all station are in the first 5_000_000 lines
 	for {
-		index = bytes.IndexByte(data, ';')
+		index = indexByte(data, ';')
 		pos += index + 1
 		if pos >= 5_000_000 {
 			break
@@ -67,7 +62,8 @@ func execute(fileName string) {
 			id++
 		}
 
-		index = bytes.IndexByte(data, '\n')
+		data = data[index+1:]
+		index = findNewlineAfterTemperature(data)
 		pos += index + 1
 
 		data = data[index+1:]
@@ -98,7 +94,7 @@ func execute(fileName string) {
 
 			for {
 				// find semicolon to get station name
-				index = bytes.IndexByte(data, ';')
+				index = indexByte(data, ';')
 				if index == -1 {
 					break
 				}
@@ -107,12 +103,28 @@ func execute(fileName string) {
 				stationID = stationSymbolMap[maphash.Bytes(maphashSeed, data[:index])]
 				data = data[index+1:]
 
-				// find newline to get temperature
-				index = bytes.IndexByte(data, '\n')
-
 				// parse temperature
-				temperature = parseNumber(data[:index])
-				data = data[index+1:]
+				{
+					negative := data[0] == '-'
+					if negative {
+						data = data[1:]
+					}
+
+					if data[1] == '.' {
+						// 1.2\n
+						temperature = int64(data[2]) + int64(data[0])*10 - '0'*(11)
+						data = data[4:]
+						// 12.3\n
+					} else {
+						_ = data[4]
+						temperature = int64(data[3]) + int64(data[1])*10 + int64(data[0])*100 - '0'*(111)
+						data = data[5:]
+					}
+
+					if negative {
+						temperature = -temperature
+					}
+				}
 
 				results[i][stationID].count++
 				results[i][stationID].sum += temperature
@@ -145,11 +157,6 @@ func execute(fileName string) {
 		}
 	}
 
-	/*
-		sort.Slice(stationNames, func(i, j int) bool {
-			return bytes.Compare(stationNames[i], stationNames[j]) < 0
-		})
-	*/
 	slices.Sort(stationNames)
 
 	fmt.Print("{")
@@ -176,13 +183,19 @@ func round(x float64) float64 {
 	return math.Round(x*10.0) / 10.0
 }
 
+func Abs(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // openFile uses syscall.Mmap to read file into memory.
 func openFile(fileName string) ([]byte, func()) {
 	f, err := os.Open(fileName)
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
 
 	stat, _ := f.Stat()
 	size := stat.Size()
@@ -192,7 +205,7 @@ func openFile(fileName string) ([]byte, func()) {
 		log.Fatalf("Mmap: %v", err)
 	}
 
-	return data, func() { syscall.Munmap(data) }
+	return data, func() { _ = syscall.Munmap(data); _ = f.Close() }
 }
 
 // parseNumber reads decimal number that matches "^-?[0-9]{1,2}[.][0-9]" pattern,
@@ -207,14 +220,37 @@ func parseNumber(data []byte) int64 {
 	switch len(data) {
 	// 1.2
 	case 3:
-		result = int64(data[0])*10 + int64(data[2]) - '0'*(10+1)
+		result = int64(data[0])*10 + int64(data[2]) - '0'*11
 	// 12.3
 	case 4:
-		result = int64(data[0])*100 + int64(data[1])*10 + int64(data[3]) - '0'*(100+10+1)
+		result = int64(data[0])*100 + int64(data[1])*10 + int64(data[3]) - '0'*111
 	}
 
 	if negative {
 		return -result
 	}
 	return result
+}
+
+func indexByte(data []byte, ch byte) int {
+	pos := -1
+	for j, c := range data {
+		if c == ch {
+			pos = j
+			break
+		}
+	}
+	return pos
+}
+
+func findNewlineAfterTemperature(data []byte) int {
+	if data[3] == '.' {
+		return 5
+	} else if data[2] == '.' {
+		return 4
+	} else if data[1] == '.' {
+		return 3
+	} else {
+		panic("invalid temperature")
+	}
 }
