@@ -42,39 +42,39 @@ func execute(fileName string) {
 	defer closer()
 
 	var (
-		id    uint64
-		index int
-		pos   int
+		id  uint64
+		pos int
+		off int
 	)
 
 	// get all station names, assume all station are in the first 5_000_000 lines
 	for {
-		for j, c := range data[index:] {
+		for j, c := range data[pos:] {
 			if c == ';' {
-				pos = j
+				off = j
 				break
 			}
 		}
 
-		if index >= 5_000_000 {
+		if pos >= 5_000_000 {
 			break
 		}
 
-		stationID := maphash.Bytes(maphashSeed, data[index:index+pos])
+		stationID := maphash.Bytes(maphashSeed, data[pos:pos+off])
 		if _, ok := stationSymbolMap[stationID]; !ok {
-			stationNames = append(stationNames, string(data[index:index+pos]))
+			stationNames = append(stationNames, string(data[pos:pos+off]))
 			stationSymbolMap[stationID] = id
 			id++
 		}
 
-		index += pos + 2
+		pos += off + 2
 
-		if data[index+2] == '.' {
-			index += 5
-		} else if data[index+1] == '.' {
-			index += 4
-		} else if data[index] == '.' {
-			index += 3
+		if data[pos+2] == '.' {
+			pos += 5
+		} else if data[pos+1] == '.' {
+			pos += 4
+		} else if data[pos] == '.' {
+			pos += 3
 		} else {
 			panic("invalid temperature")
 		}
@@ -91,6 +91,7 @@ func execute(fileName string) {
 
 			var (
 				pos         int
+				off         int
 				stationID   uint64
 				temperature int64
 			)
@@ -105,38 +106,38 @@ func execute(fileName string) {
 
 			for {
 				// find semicolon to get station name
-				pos = -1
+				off = -1
 
-				for j, c := range data {
+				for j, c := range data[pos:] {
 					if c == ';' {
-						pos = j
+						off = j
 						break
 					}
 				}
 
-				if pos == -1 {
+				if off == -1 {
 					break
 				}
 
 				// translate station name to station ID
-				stationID = stationSymbolMap[maphash.Bytes(maphashSeed, data[:pos])]
-				data = data[pos+1:]
+				stationID = stationSymbolMap[maphash.Bytes(maphashSeed, data[pos:pos+off])]
+				pos += off + 1
 
 				// parse temperature
 				{
-					negative := data[0] == '-'
+					negative := data[pos] == '-'
 					if negative {
-						data = data[1:]
+						pos++
 					}
 
-					if data[1] == '.' {
+					if data[pos+1] == '.' {
 						// 1.2\n
-						temperature = int64(data[2]) + int64(data[0])*10 - '0'*(11)
-						data = data[4:]
-						// 12.3\n
+						temperature = int64(data[pos+2]) + int64(data[pos+0])*10 - '0'*(11)
+						pos += 4
 					} else {
-						temperature = int64(data[3]) + int64(data[1])*10 + int64(data[0])*100 - '0'*(111)
-						data = data[5:]
+						// 12.3\n
+						temperature = int64(data[pos+3]) + int64(data[pos+1])*10 + int64(data[pos+0])*100 - '0'*(111)
+						pos += 5
 					}
 
 					if negative {
