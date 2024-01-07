@@ -49,28 +49,32 @@ func execute(fileName string) {
 
 	// get all station names, assume all station are in the first 5_000_000 lines
 	for {
-		index = indexByte(data, ';')
-		pos += index + 1
-		if pos >= 5_000_000 {
+		for j, c := range data[index:] {
+			if c == ';' {
+				pos = j
+				break
+			}
+		}
+
+		if index >= 5_000_000 {
 			break
 		}
 
-		stationID := maphash.Bytes(maphashSeed, data[:index])
+		stationID := maphash.Bytes(maphashSeed, data[index:index+pos])
 		if _, ok := stationSymbolMap[stationID]; !ok {
-			stationNames = append(stationNames, string(data[:index]))
+			stationNames = append(stationNames, string(data[index:index+pos]))
 			stationSymbolMap[stationID] = id
 			id++
 		}
 
-		if data[index+4] == '.' {
-			data = data[index+7:]
-			pos += index + 7
-		} else if data[index+3] == '.' {
-			data = data[index+6:]
-			pos += index + 6
-		} else if data[index+2] == '.' {
-			data = data[index+5:]
-			pos += index + 5
+		index += pos + 2
+
+		if data[index+2] == '.' {
+			index += 5
+		} else if data[index+1] == '.' {
+			index += 4
+		} else if data[index] == '.' {
+			index += 3
 		} else {
 			panic("invalid temperature")
 		}
@@ -86,7 +90,7 @@ func execute(fileName string) {
 			defer wg.Done()
 
 			var (
-				index       int
+				pos         int
 				stationID   uint64
 				temperature int64
 			)
@@ -97,18 +101,26 @@ func execute(fileName string) {
 			}
 
 			data := data[workerSize*i : last]
-			data = data[:bytes.LastIndexByte(data, '\n')+1]
+			data = data[bytes.IndexByte(data, '\n')+1 : bytes.LastIndexByte(data, '\n')+1]
 
 			for {
 				// find semicolon to get station name
-				index = indexByte(data, ';')
-				if index == -1 {
+				pos = -1
+
+				for j, c := range data {
+					if c == ';' {
+						pos = j
+						break
+					}
+				}
+
+				if pos == -1 {
 					break
 				}
 
 				// translate station name to station ID
-				stationID = stationSymbolMap[maphash.Bytes(maphashSeed, data[:index])]
-				data = data[index+1:]
+				stationID = stationSymbolMap[maphash.Bytes(maphashSeed, data[:pos])]
+				data = data[pos+1:]
 
 				// parse temperature
 				{
@@ -202,15 +214,4 @@ func openFile(fileName string) ([]byte, func()) {
 	}
 
 	return data, func() { _ = syscall.Munmap(data); _ = f.Close() }
-}
-
-func indexByte(data []byte, ch byte) int {
-	pos := -1
-	for j, c := range data {
-		if c == ch {
-			pos = j
-			break
-		}
-	}
-	return pos
 }
