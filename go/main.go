@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"hash/maphash"
-	"log"
 	"os"
-	"sort"
-	"sync"
+	"slices"
+	"strconv"
 	"syscall"
 )
 
@@ -16,14 +14,9 @@ const (
 	numberOfMaxStations = 10_000
 )
 
-var (
-	maphashSeed = maphash.MakeSeed()
+var maphashSeed = maphash.MakeSeed()
 
-	workerResults    = [workerCount][numberOfMaxStations]stationResult{}
-	stationNames     = make([][]byte, 0, numberOfMaxStations)
-	stationResults   = [numberOfMaxStations]stationResult{}
-	stationSymbolMap = make(map[uint64]uint64, numberOfMaxStations)
-)
+type WorkerResults [workerCount][numberOfMaxStations]stationResult
 
 type stationResult struct {
 	count int64
@@ -37,8 +30,27 @@ func main() {
 }
 
 func execute(fileName string) {
-	data, closer := openFile(fileName)
-	defer closer()
+	var (
+		workerResults    = WorkerResults{}
+		stationNames     = make([][]byte, 0, numberOfMaxStations)
+		stationResults   = [numberOfMaxStations]stationResult{}
+		stationSymbolMap = make(map[uint64]uint64, numberOfMaxStations)
+	)
+
+	f, err := os.Open(fileName)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	size := stat.Size()
+
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
+	if err != nil {
+		panic(err)
+	}
+	defer syscall.Munmap(data)
 
 	var (
 		id        uint64
@@ -79,13 +91,27 @@ func execute(fileName string) {
 
 	workerSize := len(data) / workerCount
 
-	wg := sync.WaitGroup{}
-	for workerID := 0; workerID < workerCount; workerID++ {
-		wg.Add(1)
+	done := make(chan struct{}, workerCount)
 
+	go func() {
+		// sort station names
+		slices.SortFunc(stationNames, func(a, b []byte) int {
+			return bytes.Compare(a, b)
+		})
+
+		done <- struct{}{}
+	}()
+
+	for workerID := 0; workerID < workerCount; workerID++ {
 		// process data in parallel
-		go func(workerID int) {
-			defer wg.Done()
+		go func(workerID int, data []byte) {
+			last := workerSize*(workerID+1) + 20
+			if last > len(data) {
+				last = len(data) - 1
+			}
+
+			data = data[workerSize*workerID : last]
+			data = data[bytes.IndexByte(data, '\n')+1 : bytes.LastIndexByte(data, '\n')+1]
 
 			var (
 				pos         int
@@ -93,14 +119,6 @@ func execute(fileName string) {
 				stationID   uint64
 				temperature int64
 			)
-
-			last := workerSize*(workerID+1) + 20
-			if last > len(data) {
-				last = len(data) - 1
-			}
-
-			data := data[workerSize*workerID : last]
-			data = data[bytes.IndexByte(data, '\n')+1 : bytes.LastIndexByte(data, '\n')+1]
 
 			for {
 				// find semicolon to get station name
@@ -152,11 +170,15 @@ func execute(fileName string) {
 					workerResults[workerID][stationID].max = temperature
 				}
 			}
-		}(workerID)
+
+			done <- struct{}{}
+		}(workerID, data)
 	}
 
 	// wait for all workers to finish
-	wg.Wait()
+	for i := 0; i <= workerCount; i++ {
+		<-done
+	}
 
 	// merge workerResults
 	for _, result := range workerResults {
@@ -176,47 +198,28 @@ func execute(fileName string) {
 		}
 	}
 
-	// sort station names
-	sort.Slice(stationNames, func(i, j int) bool {
-		return bytes.Compare(stationNames[i], stationNames[j]) < 0
-	})
-
-	fmt.Print("{")
-
 	var result stationResult
+
+	buf := make([]byte, 0, 50000)
+	buf = append(buf, '{')
 
 	// Print workerResults {station1=min/avg/max, station2=min/avg/max, ...}
 	for i, station := range stationNames {
 		if i != 0 {
-			fmt.Print(", ")
+			buf = append(buf, ',', ' ')
 		}
 
 		result = stationResults[stationSymbolMap[maphash.Bytes(maphashSeed, station)]]
-		fmt.Printf("%s=%.1f/%.1f/%.1f",
-			station,
-			float64(result.min)/10,
-			float64(result.sum)/(float64(result.count)*10),
-			float64(result.max)/10,
-		)
+
+		buf = append(buf, station...)
+		buf = append(buf, '=')
+		buf = append(buf, strconv.FormatFloat(float64(result.min)/10, 'f', 1, 64)...)
+		buf = append(buf, '/')
+		buf = append(buf, strconv.FormatFloat(float64(result.sum)/(float64(result.count)*10), 'f', 1, 64)...)
+		buf = append(buf, '/')
+		buf = append(buf, strconv.FormatFloat(float64(result.max)/10, 'f', 1, 64)...)
 	}
 
-	fmt.Print("}\n")
-}
-
-// openFile uses syscall.Mmap to read file into memory.
-func openFile(fileName string) ([]byte, func()) {
-	f, err := os.Open(fileName)
-	if err != nil {
-		panic(err)
-	}
-
-	stat, _ := f.Stat()
-	size := stat.Size()
-
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
-	if err != nil {
-		log.Fatalf("Mmap: %v", err)
-	}
-
-	return data, func() { _ = syscall.Munmap(data); _ = f.Close() }
+	buf = append(buf, '}', '\n')
+	_, _ = os.Stdout.Write(buf)
 }

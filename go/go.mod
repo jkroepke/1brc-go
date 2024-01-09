@@ -1,3 +1,3 @@
 module github.com/jkroepke/1brc-go
 
-go 1.21
+go 1.22
